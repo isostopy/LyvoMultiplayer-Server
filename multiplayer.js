@@ -1,64 +1,120 @@
-// Código para crear un servidor para un multiplayer con PlayCanvas.
 var server = require('http').createServer();
 var options = {
   cors: true
 }
 
 var io = require('socket.io')(server, options);
+
+
+// -----------------------------------------------------------
+
+// Player unidos a este server.
+// Cada entrada es un key value pair, con la key = a la room, y el value una lista de los players.
 var players = {};
 
-function Player (id) {
-    this.id = id;
-    this.x = 0;
-    this.y = 0;
-    this.z = 0;
-    this.entity = null;
-}
+// Objeto donde vamos almacenando info de la sesion.
+var data = {};
 
-io.sockets.on('connection', function(socket) {
 
-    console.log('Se ha conectado: ' + socket.id);
+// -----------------------------------------------------------
 
-    socket.on ('initialize', function () {
-        var id = socket.id;
-        var newPlayer = new Player (id);
-        // Creates a new player object with a unique ID number.
+// Mensaje que lanza Sockets.io cuando se conecta un nuevo cliente.
+io.sockets.on('connection', function(socket)
+{  
+  var id = socket.id;
+  var room = "/";
+  
+  
+  // -----------------------------
+  
+  // Mensaje que mandan los usuarios para unirse a una room.
+  socket.on ('initialize', function (newRoom = "/", playerData)
+  {
+    // Nuevo Objeto del player.
+    var newPlayer = playerData || {};
+    newPlayer.id = id;
 
-        players[id] = newPlayer;
-        // Adds the newly created player to the array.
+    // Unimos al player a la room que ha pedido.
+    room = newRoom;
+    socket.join(room);    
+    if (!players[room]) players[room] = {};
+    players[room][id] = newPlayer;
 
-        socket.emit ('playerData', {id: id, players: players});
-        // Sends the connecting client his unique ID, and data about the other players already connected.
-
-        socket.broadcast.emit ('playerJoined', newPlayer);
-        // Sends everyone except the connecting player data about the new player.
+    // Le pasamos al player su id y una lista de los players que hay unidos en su room
+    socket.emit("initialized", {id:id, players:players[room]});
+    io.to(room).emit("playerJoined", newPlayer);
+    
+    console.log("Client [" + socket.id + "] has joined room [" + room + "]");  
+  });
+  
+  // -----------------------------  
+  
+  // Mensaje que envia en bucle cada cliente actualizando su informacion.
+  socket.on("update", function(playerData)
+  {
+      players[room][playerData.id] = playerData;
+  });
+  
+  // Chat de voz
+  socket.on("voice", function(voice)
+  {
+    
+    // Se lo mandamos a todos los usuarios de su sala.
+    for  (var playerId in players[room]){
+      if (playerId == id)
+        continue;
       
-        socket.on ('initialize', function () {
-            var id = socket.id;
-            var newPlayer = new Player (id);
-            players[id] = newPlayer;
-
-            socket.emit ('playerData', {id: id, players: players});
-            socket.broadcast.emit ('playerJoined', newPlayer);
-        });
-
-        socket.on ('positionUpdate', function (data) {
-                if(!players[data.id]) return;
-                players[data.id].x = data.x;
-                players[data.id].y = data.y;
-                players[data.id].z = data.z;
-
-            socket.broadcast.emit ('playerMoved', data);
-        });
-
-        socket.on('disconnect',function(){
-            if(!players[socket.id]) return;
-            delete players[socket.id];
-            // Update clients with the new player killed 
-            socket.broadcast.emit('killPlayer',socket.id);
-        });
-    });
+      io.to(playerId).emit("voice", voice);
+    }   
+  });
+  
+  // -----------------------------
+  
+  // Mensaje que laza alguien cuando queire extraer informacion guardada.
+  socket.on("getdata", function(dataId, callback)
+  {    
+    callback(data[dataId]);
+  });
+  
+  // Mensaje que lanza alguien cuando quiere guardar informacion.
+  socket.on("setdata", function(dataId, value)
+  {
+    data[dataId] = value;
+  })
+  
+  // -----------------------------
+  
+  // Mensaje que lanza alguien para que propagemos informacion a todos los demas.
+  socket.on("event", function(eventId, eventData)
+  {
+    io.to(room).emit("event", eventId, eventData);
+  });
+  
+  // -----------------------------
+  
+  // Mensajes de Sockets.io cuando se desconecta un cliente.
+  socket.on('disconnect',function()
+  {    
+    console.log("Client [" + id + "] has leaved.")
+    delete players[room][socket.id];    
+    socket.broadcast.emit ('playerLeaved', socket.id);
+  });
+  
 });
 
-console.log ('Server started');
+// 60 veces por segundo, enviamos la informacion a los clientes de los players en su room.
+var update = function()
+{ 
+  var rooms = Object.keys(players);
+  rooms.forEach(function(room) {
+    io.to(room).emit("update", players[room]);
+  });  
+  setTimeout(update, (1/120) * 1000);
+}
+update();
+
+
+// -----------------------------------------------------------
+
+console.log("Server started.");
 server.listen(3000);
