@@ -16,6 +16,9 @@ function Player (id) {
 }
 
 io.sockets.on('connection', function(socket) {
+
+    console.log('Se ha conectado: ' + socket.id);
+
     socket.on ('initialize', function () {
         var id = socket.id;
         var newPlayer = new Player (id);
