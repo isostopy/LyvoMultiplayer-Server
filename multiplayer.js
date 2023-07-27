@@ -1,3 +1,4 @@
+// Código para crear un servidor para un multiplayer con PlayCanvas.
 var server = require('http').createServer();
 var options = {
   cors: true
